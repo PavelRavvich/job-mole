@@ -173,7 +173,7 @@ class JobSource(Protocol):
 
 ```
 ├── pyproject.toml
-├── .env.example        # OPENROUTER_API_KEY, ANTHROPIC_API_KEY, LINKEDIN_SESSION_PATH
+├── .env.example        # OPEN_ROUTER_KEY, ANTHROPIC_API_KEY, LINKEDIN_SESSION_PATH
 ├── Makefile             # make ui / make test / make lint — тонкая обёртка
 ├── resumes/             # локальные файлы резюме + кэш разбора; в .gitignore
 ├── src/job_match_agent/
