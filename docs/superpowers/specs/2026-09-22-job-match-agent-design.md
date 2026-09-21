@@ -1,4 +1,4 @@
-# Job Match Agent: LangGraph + MCP + Jev (structured decisions)
+# JobMole: LangGraph + MCP + Jev (structured decisions)
 
 Date: 2026-09-22
 Status: design agreed, pending review
@@ -243,7 +243,7 @@ entry point for the user.
 ├── resumes/             # local resume files + parse cache; in .gitignore
 ├── settings.json         # {"resume_model": "...", "web_model": "..."}; in .gitignore
 ├── seen_vacancies.json    # dedup store; in .gitignore
-├── src/job_match_agent/
+├── src/job_mole/
 │   ├── config.py         # pydantic-settings, the single place environment is read
 │   ├── llm/               # client.py (chat completions via OpenRouter), models.py (model list)
 │   ├── resume/             # parse.py, cache.py
