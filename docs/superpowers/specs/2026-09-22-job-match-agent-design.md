@@ -2,10 +2,6 @@
 
 Date: 2026-09-22
 Status: design agreed, pending review
-Supersedes: [2026-09-13-lang-graph-demo-agent-design.md](2026-09-13-lang-graph-demo-agent-design.md)
-(the "procurement" domain from the old spec was never implemented — the repo
-had no code, only the spec itself; the project's direction changed to
-job-matching)
 
 ## Goal
 
@@ -27,16 +23,16 @@ require rework (see "Phase 2 compatibility").
 
 | Decision | Choice | Why |
 |---|---|---|
-| Domain | Search and rank vacancies against the user's resumes | Replaces the unused "procurement" domain from the old spec |
+| Domain | Search and rank vacancies against the user's resumes | The project's actual purpose |
 | Matching | Jev (`typesafe/jev-1.13` on OpenRouter, System One API) | Structured decision model — a typed `Score` instead of free text, cheap input, free output |
 | Resume parsing | A model the user picks from the OpenRouter list (the "Settings" screen) | Direct Anthropic API access (`ANTHROPIC_API_KEY`) is not allowed; everything goes through the already-paid `OPEN_ROUTER_KEY`, and the model choice belongs to the user, not hardcoded |
-| Infrastructure stack | LangGraph + MCP + Jev client only | Temporal/pgvector/Langfuse/OTel from the old spec aren't needed for this task — dropped to avoid unused complexity |
+| Infrastructure stack | LangGraph + MCP + Jev client only | Keep it minimal — no Temporal/pgvector/Langfuse/OTel, avoid unused complexity |
 | UI | Streamlit | A fast internal Python tool, no separate frontend |
 | Job sources (Phase 1) | Modular adapters (`sources/`): AllJobs, Drushim. LinkedIn is deliberately excluded from Phase 1 | Starting with public Israeli portals that don't need authentication — simpler and lower ToS risk for the first pass; LinkedIn (needs a saved session) is added later via the same modular scheme, no graph changes |
 | Source access | Playwright + LLM extraction (`web` role), no saved session — public search, no login needed | Neither AllJobs nor Drushim has an open API for job search; the user knowingly accepts the ToS risk for personal, non-commercial, low-volume use |
 | Dedup storage | A JSON file (`seen_vacancies.json`) | Personal-scale data, no DB server needed |
 | Resumes | Several named resumes, stored locally, parsing is cached | The user targets different roles (Fullstack/Backend, etc.) |
-| Environment | venv via `uv`, Python 3.12, `pyproject.toml` | Same pattern as the old spec — it works, no reason to change it |
+| Environment | venv via `uv`, Python 3.12, `pyproject.toml` | A standard, low-friction setup for a local Python tool |
 
 ## Scenario
 
