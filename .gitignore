@@ -1,0 +1,23 @@
+# Personal data — resumes, parsed profiles, scraped vacancies, model choice
+resumes/
+settings.json
+seen_vacancies.json
+
+# Secrets / local config
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo

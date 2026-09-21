@@ -242,6 +242,7 @@ entry point for the user.
 ├── Makefile             # make ui / make test / make lint — a thin wrapper
 ├── resumes/             # local resume files + parse cache; in .gitignore
 ├── settings.json         # {"resume_model": "...", "web_model": "..."}; in .gitignore
+├── seen_vacancies.json    # dedup store; in .gitignore
 ├── src/job_match_agent/
 │   ├── config.py         # pydantic-settings, the single place environment is read
 │   ├── llm/               # client.py (chat completions via OpenRouter), models.py (model list)
@@ -258,6 +259,21 @@ entry point for the user.
 Boundaries are strict, same as in the original design: `resume/`,
 `sources/`, `jev/`, `llm/`, `store/` know nothing about LangGraph;
 `agent/nodes.py` knows nothing about Streamlit.
+
+### Local data and cold start
+
+`.gitignore` covers everything that's personal or generated, none of it
+ships in the repo: `resumes/`, `settings.json`, `seen_vacancies.json`, plus
+`.env` itself (only `.env.example` is tracked) and the LinkedIn session file
+(already stored outside the repo entirely, per `LINKEDIN_SESSION_PATH`).
+
+A fresh clone must still run cleanly, with none of these files present:
+`store/` and `resume/cache.py` create `resumes/`, `settings.json`, and
+`seen_vacancies.json` on first access if missing (empty state — no
+resumes, no saved model choice, no seen vacancies), rather than crashing
+on a missing file or directory. The "Settings" screen already surfaces the
+no-model-chosen case as a UI error (see "Risks"), so a cold start's only
+visible effect is that both role dropdowns start unset.
 
 ## Error handling
 
@@ -300,7 +316,7 @@ Boundaries are strict, same as in the original design: `resume/`,
 
 | # | Stage | Check |
 |---|---|---|
-| 0 | Skeleton, venv, config, Streamlit "hello world" | `make ui` opens an empty screen |
+| 0 | Skeleton, venv, config, `.gitignore`, Streamlit "hello world" | `make ui` opens an empty screen on a fresh clone — no `resumes/`, `settings.json`, or `seen_vacancies.json` present yet, nothing crashes |
 | 1 | "Settings" screen + OpenRouter model list | Both dropdowns (`resume`, `web`) show real models, the choice is saved to `settings.json` |
 | 2 | Resume parsing + cache, multiple profiles | The resumes screen shows a structured profile for an uploaded file |
 | 3 | AllJobs + Drushim sources (Playwright + LLM extraction) | Vacancies can be pulled from each source manually, independent of the agent |
