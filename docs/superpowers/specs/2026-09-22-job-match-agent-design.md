@@ -1,58 +1,59 @@
-# Job Match Agent: LangGraph + MCP + Jev (структурированные решения)
+# Job Match Agent: LangGraph + MCP + Jev (structured decisions)
 
-Дата: 2026-09-22
-Статус: дизайн согласован, ожидает ревью
-Заменяет: [2026-09-13-lang-graph-demo-agent-design.md](2026-09-13-lang-graph-demo-agent-design.md)
-(домен «закупки» из старой спеки не реализовывался — в репозитории не было кода,
-только сама спека; курс проекта сменён на job-matching)
+Date: 2026-09-22
+Status: design agreed, pending review
+Supersedes: [2026-09-13-lang-graph-demo-agent-design.md](2026-09-13-lang-graph-demo-agent-design.md)
+(the "procurement" domain from the old spec was never implemented — the repo
+had no code, only the spec itself; the project's direction changed to
+job-matching)
 
-## Цель
+## Goal
 
-Личный инструмент: агент читает несколько резюме пользователя (разные профили —
-например Fullstack и Backend), ищет вакансии в нескольких источниках, оценивает
-соответствие каждой вакансии каждому резюме через модель структурированных
-решений Jev (typesafe/jev-1.13, OpenRouter) и показывает ранжированный список в
-UI, не повторяя уже показанные вакансии.
+A personal tool: the agent reads several of the user's resumes (different
+profiles — e.g. Fullstack and Backend), searches for vacancies across
+multiple sources, scores how well each vacancy fits each resume via Jev, a
+structured-decision model (`typesafe/jev-1.13`, OpenRouter), and shows a
+ranked list in a UI without repeating vacancies already seen.
 
-Не входит в цель этой спеки (Фаза 1): автоматическая отправка откликов.
-Фаза 2 — агент, который сам заполняет формы на сайтах компаний (не только
-LinkedIn Easy Apply) и индексирует карьерные страницы — вынесена за скобки
-намеренно: это отдельная, более рискованная подсистема (реальное необратимое
-действие на сторонних сайтах), которая заслуживает собственного брейнсторминга,
-когда до неё дойдёт очередь. Архитектура Фазы 1 спроектирована так, чтобы не
-потребовать переделки при переходе к Фазе 2 (см. «Совместимость с Фазой 2»).
+Out of scope for this spec (Phase 1): automatically submitting applications.
+Phase 2 — an agent that fills in application forms on company sites itself
+(not just LinkedIn Easy Apply) and indexes career pages — is deliberately
+carved out: it's a separate, riskier subsystem (a real, irreversible action
+on third-party sites) that deserves its own brainstorming session when its
+turn comes. Phase 1's architecture is designed so the move to Phase 2 won't
+require rework (see "Phase 2 compatibility").
 
-## Принятые решения
+## Decisions
 
-| Решение | Выбор | Почему |
+| Decision | Choice | Why |
 |---|---|---|
-| Домен | Поиск и ранжирование вакансий под резюме пользователя | Заменяет неиспользованный домен «закупки» из старой спеки |
-| Матчинг | Jev (`typesafe/jev-1.13` на OpenRouter, System One API) | Structured decision model — типизированный `Score` вместо свободного текста, дешёвый вход, бесплатный выход |
-| Разбор резюме | Модель, выбираемая пользователем из списка OpenRouter (экран «Настройки») | Прямой Anthropic API (`ANTHROPIC_API_KEY`) запрещён к использованию; всё идёт через уже оплаченный `OPEN_ROUTER_KEY`, выбор модели — за пользователем, а не зашит в код |
-| Стек инфраструктуры | Только LangGraph + MCP + Jev-клиент | Temporal/pgvector/Langfuse/OTel из старой спеки не нужны для этой задачи — убраны, чтобы не тащить неиспользуемую сложность |
-| UI | Streamlit | Быстрый внутренний инструмент на Python без отдельного фронтенда |
-| Источники вакансий (Фаза 1) | Модульные адаптеры (`sources/`): AllJobs, Drushim. LinkedIn — осознанно исключён из Фазы 1 | Начинаем с публичных израильских порталов, не требующих авторизации — проще и меньше ToS-риска для первого прогона; LinkedIn (требует сохранённой сессии) добавится позже по той же модульной схеме, без изменений в графе |
-| Доступ к источникам | Playwright + LLM-экстракция (роль `web`), без сохранённой сессии — публичный поиск, логин не нужен | Ни у AllJobs, ни у Drushim нет открытого API для поиска вакансий; пользователь осознанно принимает риск нарушения ToS при личном, некоммерческом, невысоком объёме использования |
-| Хранилище дедупа | JSON-файл (`seen_vacancies.json`) | Личный масштаб данных, не нужен сервер БД |
-| Резюме | Несколько именованных резюме, хранятся локально, кэш разбора | Пользователь целится в разные роли (Fullstack/Backend и т.п.) |
-| Окружение | venv через `uv`, Python 3.12, `pyproject.toml` | Тот же паттерн, что и в старой спеке — работает, менять незачем |
+| Domain | Search and rank vacancies against the user's resumes | Replaces the unused "procurement" domain from the old spec |
+| Matching | Jev (`typesafe/jev-1.13` on OpenRouter, System One API) | Structured decision model — a typed `Score` instead of free text, cheap input, free output |
+| Resume parsing | A model the user picks from the OpenRouter list (the "Settings" screen) | Direct Anthropic API access (`ANTHROPIC_API_KEY`) is not allowed; everything goes through the already-paid `OPEN_ROUTER_KEY`, and the model choice belongs to the user, not hardcoded |
+| Infrastructure stack | LangGraph + MCP + Jev client only | Temporal/pgvector/Langfuse/OTel from the old spec aren't needed for this task — dropped to avoid unused complexity |
+| UI | Streamlit | A fast internal Python tool, no separate frontend |
+| Job sources (Phase 1) | Modular adapters (`sources/`): AllJobs, Drushim. LinkedIn is deliberately excluded from Phase 1 | Starting with public Israeli portals that don't need authentication — simpler and lower ToS risk for the first pass; LinkedIn (needs a saved session) is added later via the same modular scheme, no graph changes |
+| Source access | Playwright + LLM extraction (`web` role), no saved session — public search, no login needed | Neither AllJobs nor Drushim has an open API for job search; the user knowingly accepts the ToS risk for personal, non-commercial, low-volume use |
+| Dedup storage | A JSON file (`seen_vacancies.json`) | Personal-scale data, no DB server needed |
+| Resumes | Several named resumes, stored locally, parsing is cached | The user targets different roles (Fullstack/Backend, etc.) |
+| Environment | venv via `uv`, Python 3.12, `pyproject.toml` | Same pattern as the old spec — it works, no reason to change it |
 
-## Сценарий
+## Scenario
 
-Пользователь один раз загружает в UI несколько резюме под разными именами
-(«Fullstack», «Backend»). Дальше на экране поиска задаёт должность, локацию и
-включённые источники, жмёт «Найти». Агент: парсит (или берёт из кэша) все
-активные резюме → тянет вакансии из включённых источников → для каждой новой
-вакансии, которой ещё нет в сторе, прогоняет Jev против каждого резюме и
-берёт лучший fit-score → отфильтровывает уже виденные → показывает
-отсортированную таблицу с указанием, каким резюме получен лучший мэтч.
-Пользователь руками помечает вакансию как «откликнулся» после реального
-отклика — при следующем поиске она больше не всплывает как новая.
+The user uploads several resumes to the UI once, each under its own name
+("Fullstack", "Backend"). On the search screen they set a job title,
+location, and enabled sources, then click "Search". The agent: parses (or
+reads from cache) every active resume → pulls vacancies from the enabled
+sources → for every vacancy not yet in the store, runs Jev against each
+resume and keeps the best fit-score → filters out vacancies already seen →
+shows a sorted table noting which resume produced the best match. The user
+manually marks a vacancy as "applied" after actually applying — it no longer
+shows up as new on the next search.
 
-## Архитектура
+## Architecture
 
 ```
-Streamlit UI (upload резюме / поиск / таблица результатов / mark-applied)
+Streamlit UI (upload resumes / search / results table / mark-applied)
                       │
                       ▼
         ┌─────────────────────────────────────────┐
@@ -62,124 +63,135 @@ Streamlit UI (upload резюме / поиск / таблица результа
         └───┬──────────────┬───────────────┬────────┘
             │              │               │
             ▼              ▼               ▼
-      resumes/ (кэш)   sources/*         jev/client.py
-      llm/client.py     (linkedin.py      HTTP → OpenRouter
-      (модель из         через MCP,        System One API
-       «Настроек»)        Playwright +
-                         сессия с диска)
+      resumes/ (cache)  sources/*        jev/client.py
+      llm/client.py      (alljobs.py,     HTTP → OpenRouter
+      (model from          drushim.py:     System One API
+       "Settings")          Playwright +
+                            LLM extraction,
+                            no saved session;
+                            linkedin.py later,
+                            via MCP + saved
+                            session)
                               │
                               ▼
-                    seen_vacancies.json (дедуп, lifecycle-статус)
+                    seen_vacancies.json (dedup, lifecycle status)
 ```
 
-Оба вызова внешних моделей — `llm/client.py` (разбор резюме) и `jev/client.py`
-(матчинг) — идут через один и тот же `OPEN_ROUTER_KEY`, отдельного
-`ANTHROPIC_API_KEY` в проекте нет и не будет.
+Both external model calls — `llm/client.py` (resume parsing) and
+`jev/client.py` (matching) — go through the same `OPEN_ROUTER_KEY`; there is
+no separate `ANTHROPIC_API_KEY` in this project and there won't be one.
 
-### Узлы графа
+### Graph nodes
 
-Узлы — чистые функции `(State) -> dict`, как и в исходном дизайне: не знают
-про Streamlit, легко тестируются с подменёнными LLM/Jev/источниками.
+Nodes are pure functions `(State) -> dict`, same as in the original design:
+they know nothing about Streamlit and are easy to test with a stubbed
+LLM/Jev/sources.
 
-- **`load_resumes`** — читает список активных резюме из `resumes/`, для каждого
-  либо берёт закэшированный структурированный профиль (скиллы, годы опыта,
-  сеньорность, домены, предпочтения по локации/формату), либо, если файл
-  изменился, зовёт модель, выбранную на экране «Настройки», заново и обновляет
-  кэш (кэш хранит вместе с профилем id модели, которой он был получен —
-  смена модели в настройках инвалидирует кэш).
-- **`search_jobs`** — перебирает включённые источники из `sources/`, у каждого
-  вызывает `search(query, location, limit)`, мёржит результаты в единый список
-  `VacancyRaw` (общая форма вне зависимости от источника).
-- **`match`** — для каждой вакансии, которой нет в `seen_vacancies.json`: на
-  каждое активное резюме — один вызов Jev с четырьмя `Score`-вопросами
-  (совпадение скиллов/стека, уровень/сеньорность, домен/индустрия,
-  локация/формат работы), агрегирует в общий fit-score, берёт максимум по
-  резюме и запоминает, какое резюме дало лучший результат
-  (`matched_resume`).
-- **`filter_seen`** — отсекает вакансии, уже присутствующие в сторе.
-- **`rank`** — сортирует по fit-score.
-- **`report`** — отдаёт результат в UI и дописывает новые вакансии в
-  `seen_vacancies.json` со статусом `matched`.
+- **`load_resumes`** — reads the list of active resumes from `resumes/`; for
+  each one, either takes the cached structured profile (skills, years of
+  experience, seniority, domains, location/format preferences), or, if the
+  file changed, calls the model selected on the "Settings" screen again and
+  updates the cache (the cache stores the model id alongside the profile —
+  changing the model in Settings invalidates the cache).
+- **`search_jobs`** — iterates over the enabled sources in `sources/`, calls
+  `search(query, location, limit)` on each, and merges the results into one
+  `VacancyRaw` list (a common shape regardless of source).
+- **`match`** — for every vacancy not already in `seen_vacancies.json`: one
+  Jev call per active resume with four `Score` questions (skills/stack fit,
+  seniority level, domain/industry, location/work format), aggregated into an
+  overall fit-score; keeps the maximum across resumes and records which
+  resume produced the best result (`matched_resume`).
+- **`filter_seen`** — drops vacancies already present in the store.
+- **`rank`** — sorts by fit-score.
+- **`report`** — returns the result to the UI and appends new vacancies to
+  `seen_vacancies.json` with status `matched`.
 
-### Источники вакансий — модульный интерфейс
+### Job sources — a modular interface
 
 ```python
 class JobSource(Protocol):
     def search(self, query: str, location: str, limit: int) -> list[VacancyRaw]: ...
 ```
 
-Фаза 1 — две реализации, обе headless Playwright + LLM-экстракция (роль
-`web`) структуры вакансии из сырого HTML вместо хардкода CSS-селекторов
-(источник переживает мелкие изменения вёрстки сайта):
+Phase 1 ships two implementations, both plain Python modules calling
+headless Playwright directly (no MCP wrapper — see below for why), plus LLM
+extraction (`web` role) to turn raw HTML into vacancy structure instead of
+hardcoded CSS selectors (this keeps the source working through minor site
+layout changes):
 
-- **`sources/alljobs.py`**, **`sources/drushim.py`** — публичный поиск, без
-  сохранённой сессии: оба портала не требуют логина для просмотра вакансий.
-  **Предположение, не проверено вживую на момент написания спеки** — если на
-  практике поиск всё же требует авторизации, подключается механизм
-  `storage_state` (см. LinkedIn ниже).
+- **`sources/alljobs.py`**, **`sources/drushim.py`** — public search, no
+  saved session: neither portal requires login to browse vacancies.
+  **Assumption, not verified live at spec-writing time** — if search does
+  turn out to require authentication in practice, the same `storage_state`
+  mechanism used for LinkedIn (below) gets wired in.
 
-**LinkedIn — осознанно вне Фазы 1.** Добавится позже как `sources/linkedin.py`
-по той же схеме, но с `storage_state` (cookies) сохранённой сессии браузера
-пользователя на диске отдельно от репозитория (не коммитится, путь — в
-`.env`) — LinkedIn, в отличие от AllJobs/Drushim, требует авторизации для
-поиска вакансий. Архитектура (`JobSource`-протокол, граф) уже рассчитана на
-это — добавление не потребует изменений в `agent/graph.py`.
+**LinkedIn is deliberately out of Phase 1.** It will be added later as
+`sources/linkedin.py`, following the same `JobSource` interface but,
+unlike AllJobs/Drushim, wrapped as an MCP tool with `storage_state` (cookies)
+for a saved browser session stored on disk outside the repo (not committed;
+the path lives in `.env`) — LinkedIn requires authentication for job search,
+which is why it needs the isolated, stateful MCP process rather than a plain
+module call. The architecture (the `JobSource` protocol, the graph) already
+accounts for this — adding it later won't require changes to
+`agent/graph.py`.
 
-Остальные источники добавляются как новые модули в `sources/` без изменений в
-`agent/graph.py` — граф работает со списком источников из конфига, а не с
-конкретными именами.
+Further sources are added as new modules in `sources/` without touching
+`agent/graph.py` — the graph works off the list of sources from config, not
+hardcoded names.
 
-### LLM-клиент — две роли, обе выбираются в «Настройках»
+### LLM client — two roles, both chosen in "Settings"
 
-`llm/client.py` — обычный HTTP-клиент (`httpx`) поверх
-`POST https://openrouter.ai/api/v1/chat/completions` с `Authorization: Bearer
-{OPEN_ROUTER_KEY}`. Модель не захардкожена ни для одной роли: id модели
-читается из `settings.json`, куда его пишет экран «Настройки». Клиент
-параметризован ролью, а не только моделью — ролей две:
+`llm/client.py` is a plain HTTP client (`httpx`) over
+`POST https://openrouter.ai/api/v1/chat/completions` with `Authorization:
+Bearer {OPEN_ROUTER_KEY}`. No model is hardcoded for either role: the model
+id is read from `settings.json`, written there by the "Settings" screen. The
+client is parameterized by role, not just by model — there are two roles:
 
-- **`resume`** — разбор резюме в структурированный профиль (`load_resumes`).
-- **`web`** — извлечение структуры из сырых веб-страниц: сейчас — парсинг
-  вакансий в `sources/alljobs.py`, `sources/drushim.py` (и в будущем — в
-  `sources/linkedin.py`) перед записью в стор; в Фазе 2 та же роль
-  переиспользуется для чтения формы отклика на сайте компании (не
-  реализуется сейчас, но роль уже общая, чтобы не заводить третью).
+- **`resume`** — parses a resume into a structured profile (`load_resumes`).
+- **`web`** — extracts structure from raw web pages: right now, parsing
+  vacancies in `sources/alljobs.py` and `sources/drushim.py` (and, later,
+  `sources/linkedin.py`) before they're written to the store; in Phase 2 the
+  same role gets reused to read the application form on a company's site
+  (not implemented now, but the role is already shared so a third one isn't
+  needed later).
 
-У каждой роли — свой independent выбор модели в «Настройках» (два дропдауна),
-пользователь осознанно выбирает «умную и дешёвую» модель для `web` (объём
-токенов там больше — целые страницы) и любую модель для `resume`. Для тестов
-роль может указывать на любую модель — конкретный выбор не зашит в код и
-делается пользователем в UI, а не разработчиком в спеке.
+Each role has its own independent model choice in "Settings" (two
+dropdowns) — the user deliberately picks a "smart and cheap" model for
+`web` (higher token volume there — whole pages) and whatever model they
+like for `resume`. For tests, a role can point at any model — the concrete
+choice isn't baked into the code; it's made by the user in the UI, not by
+the developer in the spec.
 
-Список моделей для дропдаунов берётся через `GET
-https://openrouter.ai/api/v1/models` и фильтруется до тех, что поддерживают
-обычный chat-completions с текстовым вводом/выводом (исключаются
-embedding-модели, модели только-изображение и decision-модели вроде самого
-Jev — тому нужен отдельный эндпоинт, в общий список моделей для чата он не
-годится). Список кэшируется на время сессии Streamlit, чтобы не дёргать
-`/models` на каждый ререндер экрана.
+The model lists for the dropdowns come from `GET
+https://openrouter.ai/api/v1/models`, filtered down to models that support
+plain chat-completions with text input/output (embedding models,
+image-only models, and decision models like Jev itself are excluded — Jev
+needs its own endpoint and doesn't belong in a general chat-model list).
+The list is cached for the Streamlit session so `/models` isn't hit on
+every screen re-render.
 
-### Jev-клиент
+### Jev client
 
-Не MCP-инструмент, а обычный HTTP-клиент (`jev/client.py`, `httpx`) поверх
-`POST https://openrouter.ai/api/v1/systemone` — вызывается из узла `match`
-напрямую, аналогично тому, как LLM-клиент вызывается из `load_resumes`. Причина
-не заворачивать в MCP: это такой же вызов внешней модели, как и вызов
-LLM-клиента, а не инструмент с побочным эффектом.
+Not an MCP tool — a plain HTTP client (`jev/client.py`, `httpx`) over
+`POST https://openrouter.ai/api/v1/systemone`, called directly from the
+`match` node, the same way the LLM client is called from `load_resumes`.
+Reason not to wrap it in MCP: it's just another call to an external model,
+like the LLM client call, not a tool with a side effect.
 
-**Важно (не проверено вживую на момент написания спеки):** тип вопроса `Score`
-задокументирован по названию, но без примеров ответа. Перед реализацией узла
-`match` — ручная проверка реального ответа API (curl/httpx-скрипт) на паре
-примеров, чтобы зафиксировать фактический формат `answers.score`. Если формат
-не совпадёт с ожиданиями (число 0–10, как предполагается), логика агрегации
-корректируется по факту.
+**Important (not verified live at spec-writing time):** the `Score`
+question type is documented by name only, with no response examples.
+Before implementing the `match` node — manually check a real API response
+(curl/httpx script) against a couple of examples to pin down the actual
+`answers.score` format. If it doesn't match the expected shape (a 0–10
+number, as assumed), the aggregation logic gets adjusted accordingly.
 
-### Хранилище дедупа
+### Dedup storage
 
-`seen_vacancies.json` — список записей:
+`seen_vacancies.json` — a list of records:
 
 ```json
 {
-  "source": "linkedin",
+  "source": "alljobs",
   "external_id": "...",
   "url": "...",
   "title": "...",
@@ -191,118 +203,121 @@ LLM-клиента, а не инструмент с побочным эффек�
 }
 ```
 
-Ключ дедупа — `(source, external_id)`, с фолбэком на нормализованный `url`,
-если у источника нет собственного ID. `status` — открытый enum: `matched`
-(показана пользователю) сейчас; `applied` пишется вручную через отдельное
-действие в UI («Mark applied»), не автоматически.
+The dedup key is `(source, external_id)`, falling back to a normalized
+`url` if a source has no id of its own. `status` is an open enum: `matched`
+(shown to the user) is the only value written now; `applied` is written
+manually through a separate UI action ("Mark applied"), never
+automatically.
 
-### Совместимость с Фазой 2 (не реализуется сейчас)
+### Phase 2 compatibility (not implemented now)
 
-Будущий apply-агент (заполнение форм на сайтах компаний, не только Easy Apply,
-плюс индексация карьерных страниц) сможет переиспользовать: канонiчный ключ
-вакансии `(source, external_id)`, поле `matched_resume` (какое резюме
-прикладывать), открытый статус-lifecycle в сторе (появится состояние
-`applied` и, возможно, промежуточные `applying`/`failed`), а также роль `web`
-в `llm/client.py` — тот же выбор «умной и дешёвой» модели, что сейчас читает
-страницы вакансий, будет читать и заполнять формы отклика. Ничего из этого не
-реализуется в Фазе 1 — только зарезервировано в схеме и в интерфейсе
-LLM-клиента, чтобы не потребовалась миграция данных или переделка ролей.
+A future apply-agent (filling in forms on company sites, not just Easy
+Apply, plus indexing career pages) will be able to reuse: the vacancy's
+canonical key `(source, external_id)`, the `matched_resume` field (which
+resume to attach), the open status-lifecycle in the store (an `applied`
+state will appear, and possibly intermediate `applying`/`failed` ones), and
+the `web` role in `llm/client.py` — the same "smart and cheap" model choice
+that reads vacancy pages today will read and fill out application forms.
+None of this is implemented in Phase 1 — it's only reserved in the schema
+and in the LLM client's interface, so no data migration or role rework is
+needed later.
 
 ## UI (Streamlit)
 
-- **Экран резюме**: список загруженных резюме (имя, дата, статус кэша),
-  загрузка нового файла с именем, удаление.
-- **Экран поиска**: должность, локация, чекбоксы источников, кнопка «Найти» —
-  запускает граф синхронно (`st.spinner`), результат — таблица
-  (`st.dataframe`) с колонками: вакансия, компания, fit-score, резюме-мэтч,
-  ссылка, кнопка «Mark applied» в каждой строке.
-- **Экран «Настройки»**: два независимых dropdown со списком моделей с
-  OpenRouter (см. «LLM-клиент — две роли») — для роли `resume` и для роли
-  `web`. Выбор сохраняется в `settings.json`, смена модели `resume`
-  инвалидирует кэш разобранных резюме.
+- **Resumes screen**: list of uploaded resumes (name, date, cache status),
+  upload a new file under a name, delete.
+- **Search screen**: job title, location, source checkboxes, a "Search"
+  button — runs the graph synchronously (`st.spinner`), result: a table
+  (`st.dataframe`) with columns: vacancy, company, fit-score, matched
+  resume, link, a "Mark applied" button on each row.
+- **Settings screen**: two independent dropdowns listing OpenRouter models
+  (see "LLM client — two roles") — one for the `resume` role, one for the
+  `web` role. The choice is saved to `settings.json`; changing the `resume`
+  model invalidates the cache of parsed resumes.
 
-Отдельного CLI нет — Streamlit-приложение (`streamlit run`) единственная точка
-входа для пользователя.
+There's no separate CLI — the Streamlit app (`streamlit run`) is the only
+entry point for the user.
 
-## Компоненты и структура репозитория
+## Components and repository layout
 
 ```
 ├── pyproject.toml
 ├── .env.example        # OPEN_ROUTER_KEY, LINKEDIN_SESSION_PATH
-├── Makefile             # make ui / make test / make lint — тонкая обёртка
-├── resumes/             # локальные файлы резюме + кэш разбора; в .gitignore
-├── settings.json         # {"resume_model": "...", "web_model": "..."}; в .gitignore
+├── Makefile             # make ui / make test / make lint — a thin wrapper
+├── resumes/             # local resume files + parse cache; in .gitignore
+├── settings.json         # {"resume_model": "...", "web_model": "..."}; in .gitignore
 ├── src/job_match_agent/
-│   ├── config.py         # pydantic-settings, единственная точка чтения окружения
-│   ├── llm/               # client.py (chat completions через OpenRouter), models.py (список моделей)
+│   ├── config.py         # pydantic-settings, the single place environment is read
+│   ├── llm/               # client.py (chat completions via OpenRouter), models.py (model list)
 │   ├── resume/             # parse.py, cache.py
-│   ├── sources/             # base.py (Protocol), alljobs.py, drushim.py (linkedin.py — позже)
-│   ├── jev/                  # client.py — System One API клиент
+│   ├── sources/             # base.py (Protocol), alljobs.py, drushim.py (linkedin.py — later)
+│   ├── jev/                  # client.py — System One API client
 │   ├── agent/                  # state.py, nodes.py, graph.py
-│   ├── store/                    # seen_vacancies.py, settings.py — чтение/запись JSON
+│   ├── store/                    # seen_vacancies.py, settings.py — JSON read/write
 │   └── ui/
-│       └── app.py                  # Streamlit entrypoint (экраны: резюме, поиск, настройки)
+│       └── app.py                  # Streamlit entrypoint (screens: resumes, search, settings)
 └── tests/
 ```
 
-Границы жёсткие, как и в исходном дизайне: `resume/`, `sources/`, `jev/`,
-`llm/`, `store/` не знают про LangGraph; `agent/nodes.py` не знает про
-Streamlit.
+Boundaries are strict, same as in the original design: `resume/`,
+`sources/`, `jev/`, `llm/`, `store/` know nothing about LangGraph;
+`agent/nodes.py` knows nothing about Streamlit.
 
-## Обработка ошибок
+## Error handling
 
-- Источники (AllJobs/Drushim): сбой скрейпинга (изменившаяся вёрстка, капча,
-  рейтлимит) — узел логирует и возвращает пустой список для этого источника,
-  не роняет весь прогон (другие источники и резюме всё равно обрабатываются).
-- Jev: retry один раз при сетевой ошибке; при устойчивой неудаче вакансия
-  помечается `fit_score: null` и остаётся в списке (видно, что не оценилось,
-  а не пропадает молча).
-- Нечитаемый файл резюме — явная ошибка в UI при загрузке, дальше не идём.
+- Sources (AllJobs/Drushim): a scraping failure (layout changed, captcha,
+  rate limit) — the node logs it and returns an empty list for that source,
+  without failing the whole run (other sources and resumes are still
+  processed).
+- Jev: retry once on a network error; on a persistent failure the vacancy is
+  marked `fit_score: null` and stays in the list (visible as unscored,
+  rather than silently disappearing).
+- An unreadable resume file — an explicit error in the UI on upload; we
+  don't proceed further.
 
-## Тестирование
+## Testing
 
-- **Unit**: `resume/parse.py` с фикстур-текстом и замоканным LLM-клиентом
-  (роль `resume`); LLM-экстракция вакансии из сырого HTML внутри
-  каждого источника (`alljobs.py`, `drushim.py`) — с фикстур-HTML и
-  замоканным LLM-клиентом (роль `web`), отдельно от самого
-  Playwright-скрейпинга; `agent/nodes.py::match` с
-  замоканным Jev-клиентом (API малоизвестный и не проверен вживую на момент
-  написания — в тестах не полагаемся на реальный ответ); дедуп/lifecycle-
-  логика `store/seen_vacancies.py` — чистые функции, тестируются без сети.
-- **Ручные/интеграционные**: сам Playwright-скрейпинг AllJobs/Drushim — не
-  гоняется в CI, актуальность структуры страницы проверяется вручную по мере
-  необходимости.
-- Разработка по TDD: тест на поведение узла — до реализации.
+- **Unit**: `resume/parse.py` with fixture text and a stubbed LLM client
+  (`resume` role); LLM extraction of a vacancy from raw HTML inside each
+  source (`alljobs.py`, `drushim.py`) — with fixture HTML and a stubbed LLM
+  client (`web` role), separate from the Playwright scraping itself;
+  `agent/nodes.py::match` with a stubbed Jev client (the API is obscure and
+  hasn't been verified live at writing time — tests don't rely on a real
+  response); dedup/lifecycle logic in `store/seen_vacancies.py` — pure
+  functions, tested without the network.
+- **Manual/integration**: the actual Playwright scraping for AllJobs/Drushim
+  — not run in CI; page-structure freshness is checked manually as needed.
+- TDD: a test for the node's behavior is written before the implementation.
 
-## Риски
+## Risks
 
-| Риск | Реакция |
+| Risk | Response |
 |---|---|
-| ToS AllJobs/Drushim, вероятно, запрещают автоматизированный сбор данных (конкретные формулировки не проверены на момент написания спеки) | Пользователь осознанно принимает риск при личном, невысоком по объёму использовании |
-| Jev `Score` API не проверен вживую, формат ответа под вопросом | Перед реализацией `match` — ручная проверка реального ответа API; в тестах Jev замокан на границе клиента |
-| Хрупкость вёрстки AllJobs/Drushim при обновлениях сайта | Узел `search_jobs` не падает целиком при сбое одного источника — вакансии просто не находятся в этом прогоне; LLM-экстракция (роль `web`) устойчивее к мелким изменениям, чем CSS-селекторы, но не абсолютна |
-| N резюме × M вакансий = N×M вызовов Jev за прогон | Вход у Jev дешёвый ($0.042/M токенов), выход бесплатный; при личном масштабе (единицы резюме, десятки вакансий за прогон) не критично |
-| Кэш резюме протухнет незаметно | Инвалидация по хэшу содержимого файла и по id модели — не по дате, так что и правка резюме, и смена модели в «Настройках» всегда пере-парсят |
-| Пользователь не выбрал модель (`resume`/`web`) / список `/models` недоступен | Экран «Настройки» — обязательный первый шаг перед разбором резюме и поиском вакансий; явная ошибка в UI по конкретной роли, если модель для неё не выбрана, вместо тихого фолбэка на что-то зашитое в код |
+| AllJobs/Drushim ToS likely prohibit automated data collection (the exact wording for these two hasn't been checked at spec-writing time) | The user knowingly accepts the risk for personal, low-volume use |
+| The Jev `Score` API hasn't been verified live, response format is uncertain | Before implementing `match` — manually check a real API response; Jev is stubbed at the client boundary in tests |
+| AllJobs/Drushim layout fragility on site updates | `search_jobs` doesn't fail entirely if one source breaks — vacancies simply aren't found from it that run; LLM extraction (`web` role) is more resilient to small changes than CSS selectors, but not immune |
+| N resumes × M vacancies = N×M Jev calls per run | Jev's input is cheap ($0.042/M tokens), output is free; at personal scale (a handful of resumes, tens of vacancies per run) this isn't a concern |
+| The resume cache goes stale unnoticed | Invalidated by file content hash and by model id — not by date, so both editing a resume and changing the model in "Settings" always re-parse |
+| The user hasn't picked a model (`resume`/`web`) yet, or `/models` is unreachable | The "Settings" screen is a mandatory first step before parsing resumes or searching for jobs; an explicit, role-specific UI error if a model isn't chosen, instead of a silent fallback to something hardcoded |
 
-## Этапы
+## Stages
 
-| # | Этап | Проверка |
+| # | Stage | Check |
 |---|---|---|
-| 0 | Скелет, venv, конфиг, Streamlit "hello world" | `make ui` открывает пустой экран |
-| 1 | Экран «Настройки» + список моделей OpenRouter | Оба дропдауна (`resume`, `web`) показывают реальные модели, выбор сохраняется в `settings.json` |
-| 2 | Разбор резюме + кэш, несколько профилей | Экран резюме показывает структурированный профиль для загруженного файла |
-| 3 | Источники AllJobs + Drushim (Playwright + LLM-экстракция) | Вакансии дёргаются вручную из каждого источника, в отрыве от агента |
-| 4 | Jev-клиент + логика матчинга | На фикстурах (замоканный Jev) считается корректный агрегированный fit-score |
-| 5 | Граф целиком, собран в UI | Поиск в Streamlit проходит end-to-end, таблица заполняется |
-| 6 | Дедуп + Mark applied | Повторный поиск не показывает уже виденные вакансии |
+| 0 | Skeleton, venv, config, Streamlit "hello world" | `make ui` opens an empty screen |
+| 1 | "Settings" screen + OpenRouter model list | Both dropdowns (`resume`, `web`) show real models, the choice is saved to `settings.json` |
+| 2 | Resume parsing + cache, multiple profiles | The resumes screen shows a structured profile for an uploaded file |
+| 3 | AllJobs + Drushim sources (Playwright + LLM extraction) | Vacancies can be pulled from each source manually, independent of the agent |
+| 4 | Jev client + matching logic | On fixtures (a stubbed Jev), a correct aggregated fit-score is computed |
+| 5 | The full graph, wired into the UI | A search in Streamlit runs end-to-end, the table fills in |
+| 6 | Dedup + Mark applied | A repeat search doesn't show vacancies already seen |
 
-## Legal/ToS-примечание
+## Legal/ToS note
 
-Автоматизированный скрейпинг AllJobs и Drushim, вероятно, нарушает их
-пользовательские соглашения (типовая формулировка для job-порталов — конкретный
-текст ToS этих двух площадок не проверялся на момент написания спеки).
-Решение принято осознанно пользователем для личного некоммерческого
-использования с невысокой частотой запросов. При добавлении LinkedIn (позже,
-вне Фазы 1) риск аналогичный, но выше из-за необходимости личной сессии —
-скрейпинг через Playwright с ней нарушает LinkedIn User Agreement напрямую.
+Automated scraping of AllJobs and Drushim likely violates their terms of
+use (a typical clause for job portals — the exact ToS text for these two
+sites hasn't been checked at spec-writing time). The decision was made
+knowingly by the user, for personal, non-commercial use at low request
+volume. Adding LinkedIn later (outside Phase 1) carries a similar but
+higher risk, because it requires a personal session — scraping through
+Playwright with that session directly violates the LinkedIn User Agreement.
