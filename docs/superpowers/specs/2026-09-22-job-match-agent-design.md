@@ -1,4 +1,4 @@
-# JobMole: LangGraph + MCP + Jev (structured decisions)
+# JobMole: LangGraph + JobsPipe + Jev (structured decisions)
 
 Date: 2026-09-22
 Status: design agreed, pending review
@@ -26,10 +26,10 @@ require rework (see "Phase 2 compatibility").
 | Domain | Search and rank vacancies against the user's resumes | The project's actual purpose |
 | Matching | Jev (`typesafe/jev-1.13` on OpenRouter, System One API) | Structured decision model — a typed `Score` instead of free text, cheap input, free output |
 | Resume parsing | A model the user picks from the OpenRouter list (the "Settings" screen) | Direct Anthropic API access (`ANTHROPIC_API_KEY`) is not allowed; everything goes through the already-paid `OPEN_ROUTER_KEY`, and the model choice belongs to the user, not hardcoded |
-| Infrastructure stack | LangGraph + MCP + Jev client only | Keep it minimal — no Temporal/pgvector/Langfuse/OTel, avoid unused complexity |
+| Infrastructure stack | LangGraph + Jev client only, no MCP | Keep it minimal — no Temporal/pgvector/Langfuse/OTel; MCP dropped too, since it was only in the stack to wrap browser-automation sources, and Phase 1 no longer scrapes anything (see below) |
 | UI | Streamlit | A fast internal Python tool, no separate frontend |
-| Job sources (Phase 1) | Modular adapters (`sources/`): AllJobs, Drushim. LinkedIn is deliberately excluded from Phase 1 | Starting with public Israeli portals that don't need authentication — simpler and lower ToS risk for the first pass; LinkedIn (needs a saved session) is added later via the same modular scheme, no graph changes |
-| Source access | Playwright + LLM extraction (`web` role), no saved session — public search, no login needed | Neither AllJobs nor Drushim has an open API for job search; the user knowingly accepts the ToS risk for personal, non-commercial, low-volume use |
+| Job sources (Phase 1) | JobsPipe API (`jobspipe.dev`) — one aggregator over 30+ ATS platforms and job boards (Greenhouse, Lever, Workday, Comeet, SmartRecruiters, Indeed, LinkedIn, Glassdoor, ZipRecruiter, YC, and more) | Verified live via its own docs (`docs.jobspipe.dev`) — a real, paid API with a clean REST contract, not scraping; also resolves the earlier LinkedIn-access problem for free, since LinkedIn postings arrive through JobsPipe's own aggregation rather than our own session-scraping |
+| Source access | `POST https://api.jobspipe.dev/v1/jobs/search`, Bearer token (`JOBSPIPE_API_KEY`), filtered by `country_code` (IL) and `job_title_or` | Normalized JSON response, already includes `apply_url` per posting — no HTML parsing or LLM extraction needed for search; no ToS/scraping risk, since it's a paid API used as intended |
 | Dedup storage | A JSON file (`seen_vacancies.json`) | Personal-scale data, no DB server needed |
 | Resumes | Several named resumes, stored locally, parsing is cached | The user targets different roles (Fullstack/Backend, etc.) |
 | Environment | venv via `uv`, Python 3.12, `pyproject.toml` | A standard, low-friction setup for a local Python tool |
@@ -59,15 +59,11 @@ Streamlit UI (upload resumes / search / results table / mark-applied)
         └───┬──────────────┬───────────────┬────────┘
             │              │               │
             ▼              ▼               ▼
-      resumes/ (cache)  sources/*        jev/client.py
-      llm/client.py      (alljobs.py,     HTTP → OpenRouter
-      (model from          drushim.py:     System One API
-       "Settings")          Playwright +
-                            LLM extraction,
-                            no saved session;
-                            linkedin.py later,
-                            via MCP + saved
-                            session)
+      resumes/ (cache)  sources/          jev/client.py
+      llm/client.py     jobspipe.py:       HTTP → OpenRouter
+      (model from        HTTP → JobsPipe   System One API
+       "Settings")        API, Bearer
+                          token
                               │
                               ▼
                     seen_vacancies.json (dedup, lifecycle status)
@@ -109,31 +105,22 @@ class JobSource(Protocol):
     def search(self, query: str, location: str, limit: int) -> list[VacancyRaw]: ...
 ```
 
-Phase 1 ships two implementations, both plain Python modules calling
-headless Playwright directly (no MCP wrapper — see below for why), plus LLM
-extraction (`web` role) to turn raw HTML into vacancy structure instead of
-hardcoded CSS selectors (this keeps the source working through minor site
-layout changes):
+Phase 1 ships one implementation, **`sources/jobspipe.py`** — a plain HTTP
+client (`httpx`) over `POST https://api.jobspipe.dev/v1/jobs/search` with
+`Authorization: Bearer {JOBSPIPE_API_KEY}`. Maps the UI's job-title chips to
+`job_title_or`, restricts to `country_code: "IL"`, and reads `apply_url`
+straight from the response (useful later — see "Phase 2 compatibility").
+No browser automation, no LLM extraction, no ToS risk: it's a paid API used
+through its documented contract.
 
-- **`sources/alljobs.py`**, **`sources/drushim.py`** — public search, no
-  saved session: neither portal requires login to browse vacancies.
-  **Assumption, not verified live at spec-writing time** — if search does
-  turn out to require authentication in practice, the same `storage_state`
-  mechanism used for LinkedIn (below) gets wired in.
-
-**LinkedIn is deliberately out of Phase 1.** It will be added later as
-`sources/linkedin.py`, following the same `JobSource` interface but,
-unlike AllJobs/Drushim, wrapped as an MCP tool with `storage_state` (cookies)
-for a saved browser session stored on disk outside the repo (not committed;
-the path lives in `.env`) — LinkedIn requires authentication for job search,
-which is why it needs the isolated, stateful MCP process rather than a plain
-module call. The architecture (the `JobSource` protocol, the graph) already
-accounts for this — adding it later won't require changes to
-`agent/graph.py`.
-
-Further sources are added as new modules in `sources/` without touching
-`agent/graph.py` — the graph works off the list of sources from config, not
-hardcoded names.
+The `JobSource` protocol stays in place for a reason beyond this one
+implementation: JobsPipe's coverage is ATS platforms and major boards
+(Greenhouse, Lever, Workday, Comeet, Indeed, LinkedIn, Glassdoor,
+ZipRecruiter, YC) — it does **not** include Israeli portals like AllJobs or
+Drushim (checked directly against its docs). If that coverage gap turns out
+to matter in practice, a direct-scrape source for one of those can be added
+later as a new `sources/*.py` module without touching `agent/graph.py` — the
+graph works off the list of sources from config, not hardcoded names.
 
 ### LLM client — two roles, both chosen in "Settings"
 
@@ -144,12 +131,12 @@ id is read from `settings.json`, written there by the "Settings" screen. The
 client is parameterized by role, not just by model — there are two roles:
 
 - **`resume`** — parses a resume into a structured profile (`load_resumes`).
-- **`web`** — extracts structure from raw web pages: right now, parsing
-  vacancies in `sources/alljobs.py` and `sources/drushim.py` (and, later,
-  `sources/linkedin.py`) before they're written to the store; in Phase 2 the
-  same role gets reused to read the application form on a company's site
-  (not implemented now, but the role is already shared so a third one isn't
-  needed later).
+- **`web`** — reserved for Phase 2: reading and filling out an application
+  form on a company's site. **Not used anywhere in Phase 1** — now that
+  vacancy search goes through the JobsPipe API (structured JSON, no HTML to
+  parse), there's no Phase 1 caller for this role. It's kept in the client's
+  interface and in the "Settings" screen now anyway, so Phase 2 doesn't need
+  a UI change to introduce it later.
 
 Each role has its own independent model choice in "Settings" (two
 dropdowns) — the user deliberately picks a "smart and cheap" model for
@@ -168,11 +155,10 @@ every screen re-render.
 
 ### Jev client
 
-Not an MCP tool — a plain HTTP client (`jev/client.py`, `httpx`) over
+A plain HTTP client (`jev/client.py`, `httpx`) over
 `POST https://openrouter.ai/api/v1/systemone`, called directly from the
-`match` node, the same way the LLM client is called from `load_resumes`.
-Reason not to wrap it in MCP: it's just another call to an external model,
-like the LLM client call, not a tool with a side effect.
+`match` node, the same way the LLM client is called from `load_resumes` —
+just another call to an external model, not a tool with a side effect.
 
 **Important (not verified live at spec-writing time):** the `Score`
 question type is documented by name only, with no response examples.
@@ -208,15 +194,16 @@ automatically.
 ### Phase 2 compatibility (not implemented now)
 
 A future apply-agent (filling in forms on company sites, not just Easy
-Apply, plus indexing career pages) will be able to reuse: the vacancy's
-canonical key `(source, external_id)`, the `matched_resume` field (which
-resume to attach), the open status-lifecycle in the store (an `applied`
-state will appear, and possibly intermediate `applying`/`failed` ones), and
-the `web` role in `llm/client.py` — the same "smart and cheap" model choice
-that reads vacancy pages today will read and fill out application forms.
-None of this is implemented in Phase 1 — it's only reserved in the schema
-and in the LLM client's interface, so no data migration or role rework is
-needed later.
+Apply) will be able to reuse: the vacancy's canonical key
+`(source, external_id)`, the `apply_url` JobsPipe already returns per
+posting (no extra extraction step needed to find where to apply), the
+`matched_resume` field (which resume to attach), the open status-lifecycle
+in the store (an `applied` state will appear, and possibly intermediate
+`applying`/`failed` ones), and the `web` role in `llm/client.py` — reserved
+but unused in Phase 1 — which will read and fill out the application form
+found at `apply_url`. None of this is implemented in Phase 1 — it's only
+reserved in the schema and in the LLM client's interface, so no data
+migration or role rework is needed later.
 
 ## UI (Streamlit)
 
@@ -238,7 +225,7 @@ entry point for the user.
 
 ```
 ├── pyproject.toml
-├── .env.example        # OPEN_ROUTER_KEY, LINKEDIN_SESSION_PATH
+├── .env.example        # OPEN_ROUTER_KEY, JOBSPIPE_API_KEY
 ├── Makefile             # make ui / make test / make lint — a thin wrapper
 ├── resumes/             # local resume files + parse cache; in .gitignore
 ├── settings.json         # {"resume_model": "...", "web_model": "..."}; in .gitignore
@@ -247,7 +234,7 @@ entry point for the user.
 │   ├── config.py         # pydantic-settings, the single place environment is read
 │   ├── llm/               # client.py (chat completions via OpenRouter), models.py (model list)
 │   ├── resume/             # parse.py, cache.py
-│   ├── sources/             # base.py (Protocol), alljobs.py, drushim.py (linkedin.py — later)
+│   ├── sources/             # base.py (Protocol), jobspipe.py
 │   ├── jev/                  # client.py — System One API client
 │   ├── agent/                  # state.py, nodes.py, graph.py
 │   ├── store/                    # seen_vacancies.py, settings.py — JSON read/write
@@ -264,8 +251,7 @@ Boundaries are strict, same as in the original design: `resume/`,
 
 `.gitignore` covers everything that's personal or generated, none of it
 ships in the repo: `resumes/`, `settings.json`, `seen_vacancies.json`, plus
-`.env` itself (only `.env.example` is tracked) and the LinkedIn session file
-(already stored outside the repo entirely, per `LINKEDIN_SESSION_PATH`).
+`.env` itself (only `.env.example` is tracked).
 
 A fresh clone must still run cleanly, with none of these files present:
 `store/` and `resume/cache.py` create `resumes/`, `settings.json`, and
@@ -277,10 +263,9 @@ visible effect is that both role dropdowns start unset.
 
 ## Error handling
 
-- Sources (AllJobs/Drushim): a scraping failure (layout changed, captcha,
-  rate limit) — the node logs it and returns an empty list for that source,
-  without failing the whole run (other sources and resumes are still
-  processed).
+- JobsPipe: an API error, rate limit, or an empty free-tier credit balance
+  — the node logs it and returns an empty list, without failing the whole
+  run (resumes and matching still proceed on whatever was already fetched).
 - Jev: retry once on a network error; on a persistent failure the vacancy is
   marked `fit_score: null` and stays in the list (visible as unscored,
   rather than silently disappearing).
@@ -290,24 +275,25 @@ visible effect is that both role dropdowns start unset.
 ## Testing
 
 - **Unit**: `resume/parse.py` with fixture text and a stubbed LLM client
-  (`resume` role); LLM extraction of a vacancy from raw HTML inside each
-  source (`alljobs.py`, `drushim.py`) — with fixture HTML and a stubbed LLM
-  client (`web` role), separate from the Playwright scraping itself;
-  `agent/nodes.py::match` with a stubbed Jev client (the API is obscure and
-  hasn't been verified live at writing time — tests don't rely on a real
-  response); dedup/lifecycle logic in `store/seen_vacancies.py` — pure
-  functions, tested without the network.
-- **Manual/integration**: the actual Playwright scraping for AllJobs/Drushim
-  — not run in CI; page-structure freshness is checked manually as needed.
+  (`resume` role); `sources/jobspipe.py` with a stubbed HTTP response
+  (fixture JSON matching JobsPipe's documented schema); `agent/nodes.py::match`
+  with a stubbed Jev client (the API is obscure and hasn't been verified live
+  at writing time — tests don't rely on a real response); dedup/lifecycle
+  logic in `store/seen_vacancies.py` — pure functions, tested without the
+  network.
+- **Manual/integration**: one real call to JobsPipe against its free tier,
+  to confirm the live response still matches the fixture shape used in unit
+  tests — not run in CI, checked manually as needed.
 - TDD: a test for the node's behavior is written before the implementation.
 
 ## Risks
 
 | Risk | Response |
 |---|---|
-| AllJobs/Drushim ToS likely prohibit automated data collection (the exact wording for these two hasn't been checked at spec-writing time) | The user knowingly accepts the risk for personal, low-volume use |
+| JobsPipe doesn't cover AllJobs/Drushim and isn't guaranteed to surface every Israeli hi-tech vacancy — only what's published through the ATS platforms/boards it covers (though many Israeli startups do sit on Greenhouse/Lever/Comeet) | The `JobSource` protocol is already set up to add another source later if this coverage gap turns out to matter in practice |
+| The JobsPipe API hasn't been verified live under a real key at spec-writing time — only against its docs | Manually check a real response (curl/httpx script) before implementing `sources/jobspipe.py`; the client is stubbed at the HTTP boundary in tests |
 | The Jev `Score` API hasn't been verified live, response format is uncertain | Before implementing `match` — manually check a real API response; Jev is stubbed at the client boundary in tests |
-| AllJobs/Drushim layout fragility on site updates | `search_jobs` doesn't fail entirely if one source breaks — vacancies simply aren't found from it that run; LLM extraction (`web` role) is more resilient to small changes than CSS selectors, but not immune |
+| JobsPipe's free tier is capped (1,000 jobs/month) | Fine at personal scale (occasional runs, sane per-search limits); paid tiers start at $49/month if more is needed |
 | N resumes × M vacancies = N×M Jev calls per run | Jev's input is cheap ($0.042/M tokens), output is free; at personal scale (a handful of resumes, tens of vacancies per run) this isn't a concern |
 | The resume cache goes stale unnoticed | Invalidated by file content hash and by model id — not by date, so both editing a resume and changing the model in "Settings" always re-parse |
 | The user hasn't picked a model (`resume`/`web`) yet, or `/models` is unreachable | The "Settings" screen is a mandatory first step before parsing resumes or searching for jobs; an explicit, role-specific UI error if a model isn't chosen, instead of a silent fallback to something hardcoded |
@@ -319,17 +305,16 @@ visible effect is that both role dropdowns start unset.
 | 0 | Skeleton, venv, config, `.gitignore`, Streamlit "hello world" | `make ui` opens an empty screen on a fresh clone — no `resumes/`, `settings.json`, or `seen_vacancies.json` present yet, nothing crashes |
 | 1 | "Settings" screen + OpenRouter model list | Both dropdowns (`resume`, `web`) show real models, the choice is saved to `settings.json` |
 | 2 | Resume parsing + cache, multiple profiles | The resumes screen shows a structured profile for an uploaded file |
-| 3 | AllJobs + Drushim sources (Playwright + LLM extraction) | Vacancies can be pulled from each source manually, independent of the agent |
+| 3 | JobsPipe source client | Vacancies can be pulled from `sources/jobspipe.py` manually, independent of the agent |
 | 4 | Jev client + matching logic | On fixtures (a stubbed Jev), a correct aggregated fit-score is computed |
 | 5 | The full graph, wired into the UI | A search in Streamlit runs end-to-end, the table fills in |
 | 6 | Dedup + Mark applied | A repeat search doesn't show vacancies already seen |
 
-## Legal/ToS note
+## API usage note
 
-Automated scraping of AllJobs and Drushim likely violates their terms of
-use (a typical clause for job portals — the exact ToS text for these two
-sites hasn't been checked at spec-writing time). The decision was made
-knowingly by the user, for personal, non-commercial use at low request
-volume. Adding LinkedIn later (outside Phase 1) carries a similar but
-higher risk, because it requires a personal session — scraping through
-Playwright with that session directly violates the LinkedIn User Agreement.
+Phase 1 has no scraping and no ToS risk of that kind anymore: JobsPipe is
+used as a paying customer, through its documented API contract, not against
+the terms of the sites it aggregates. The only remaining real-world-action
+risk in this project is Phase 2's actual form submission on company sites —
+already called out in "Phase 2 compatibility" and to be designed carefully
+when that phase is brainstormed.
