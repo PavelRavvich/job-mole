@@ -21,3 +21,6 @@ build/
 .DS_Store
 *.swp
 *.swo
+
+# Brainstorming visual companion
+.superpowers/
